@@ -1,0 +1,60 @@
+{
+  "_comment": "散水コントローラー設定。数値を書き換えて保存するだけで反映されます（Wi-Fi設定モードの画面からも変更可）。",
+
+  "measure_interval_min": 10,
+
+  "threshold_on_pct": 35,
+  "threshold_off_pct": 60,
+  "dry_confirm_delay_min": 60,
+  "min_interval_between_waterings_min": 360,
+  "max_waterings_per_day": 3,
+  "allowed_hours": null,
+
+  "watering": {
+    "spray_sec": 180,
+    "pause_sec": 300,
+    "repeats": 2,
+    "recheck_after_each_spray": true,
+    "max_spray_sec_hard_limit": 900
+  },
+
+  "sensor": {
+    "raw_dry_mv": 2200,
+    "raw_wet_mv": 1200,
+    "samples": 16,
+    "warmup_ms": 500
+  },
+
+  "valve": {
+    "type": "ball_3wire",
+    "travel_ms": 8000,
+    "pulse_ms": 50
+  },
+
+  "battery": {
+    "enabled": false,
+    "divider_ratio": 2.0,
+    "low_battery_mv": 3450
+  },
+
+  "pins": {
+    "_comment": "GPIO番号。XIAO ESP32C3: D0..D10 = GPIO 2,3,4,5,6,7,21,20,8,9,10。ストラップピン(GPIO2,8,9)は未使用にしてある",
+    "sensor_adc": 3,
+    "battery_adc": 4,
+    "sensor_power": 5,
+    "valve_a": 6,
+    "valve_b": 7,
+    "config_button": 20,
+    "led": 10
+  },
+
+  "wifi": {
+    "ap_ssid": "watering-setup",
+    "ap_password": "mizuyari123",
+    "config_mode_timeout_min": 10
+  },
+
+  "log": {
+    "max_bytes": 200000
+  }
+}
