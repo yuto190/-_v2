@@ -26,9 +26,11 @@
   },
 
   "valve": {
+    "_comment": "type: ball_3wire(CR-02/CR-01) | latch_2wire | nc_mosfet。travel_ms は実測の開閉時間+3秒程度",
     "type": "ball_3wire",
-    "travel_ms": 8000,
-    "pulse_ms": 50
+    "travel_ms": 10000,
+    "pulse_ms": 50,
+    "power_settle_ms": 100
   },
 
   "battery": {
@@ -45,7 +47,9 @@
     "valve_a": 6,
     "valve_b": 7,
     "config_button": 20,
-    "led": 10
+    "valve_power_en": 10,
+    "led": 21,
+    "_comment2": "valve_power_en: 12V昇圧DCDCのEN。DC3-6V弁を電池直結で使うなら null"
   },
 
   "wifi": {

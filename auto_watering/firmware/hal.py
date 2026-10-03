@@ -3,9 +3,11 @@
 
 - Sensor      : 静電容量式土壌水分センサー（アナログ）。測定時だけ GPIO から給電する
 - Valve*      : 弁の種類ごとのドライバ
-    ball_3wire : 電動ボールバルブ CR-02 型（黄=共通−, 赤+で開, 青+で閉）を DRV8835 で駆動
-    latch_2wire: ラッチ式（自己保持）電磁弁。極性反転パルスで開閉。DRV8835 で駆動
+    ball_3wire : 電動ボールバルブ CR-02 型（COM=GND, OPEN線に+で開, CLOSE線に+で閉）
+                 または CR-01 型（2線・極性反転）。Hブリッジ（TB67H450 / DRV8835）で駆動
+    latch_2wire: ラッチ式（自己保持）電磁弁。極性反転パルスで開閉
     nc_mosfet  : 常時閉(NC)電磁弁。Nch MOSFET で通電中だけ開く
+  pins.valve_power_en を指定すると、弁を動かす間だけ昇圧DCDC（例: 12V）の EN を H にする。
 - Button / Led / Battery
 """
 import time
@@ -37,34 +39,58 @@ class Sensor:
         return _median(vals)
 
 
+class _PowerGate:
+    """弁用電源（昇圧DCDC の EN）の ON/OFF。gpio が None なら何もしない。"""
+
+    def __init__(self, gpio=None, settle_ms=0):
+        self.pin = Pin(gpio, Pin.OUT, value=0) if gpio is not None else None
+        self.settle_ms = settle_ms
+
+    def on(self):
+        if self.pin is not None:
+            self.pin.value(1)
+            if self.settle_ms:
+                time.sleep_ms(self.settle_ms)
+
+    def off(self):
+        if self.pin is not None:
+            self.pin.value(0)
+
+
 class _TwoPin:
-    def __init__(self, a_gpio, b_gpio):
+    def __init__(self, a_gpio, b_gpio, power=None):
         self.a = Pin(a_gpio, Pin.OUT, value=0)
         self.b = Pin(b_gpio, Pin.OUT, value=0)
+        self.power = power or _PowerGate()
 
     def _drive(self, a, b, ms, feed=None):
-        self.a.value(a)
-        self.b.value(b)
-        remaining = ms
-        while remaining > 0:
-            step = 200 if remaining > 200 else remaining
-            time.sleep_ms(step)
-            remaining -= step
-            if feed:
-                feed()
-        self.a.value(0)
-        self.b.value(0)
+        self.power.on()
+        try:
+            self.a.value(a)
+            self.b.value(b)
+            remaining = ms
+            while remaining > 0:
+                step = 200 if remaining > 200 else remaining
+                time.sleep_ms(step)
+                remaining -= step
+                if feed:
+                    feed()
+        finally:
+            self.a.value(0)
+            self.b.value(0)
+            self.power.off()
 
     def idle(self):
         self.a.value(0)
         self.b.value(0)
+        self.power.off()
 
 
 class ValveBall3Wire(_TwoPin):
-    """CR-02 型電動ボールバルブ。内蔵リミットスイッチで止まるので travel_ms 通電後に出力を落とす。"""
+    """CR-02 / CR-01 型電動ボールバルブ。内蔵リミットスイッチで止まるので travel_ms 通電後に出力を落とす。"""
 
-    def __init__(self, a_gpio, b_gpio, travel_ms=8000):
-        super().__init__(a_gpio, b_gpio)
+    def __init__(self, a_gpio, b_gpio, travel_ms=8000, power=None):
+        super().__init__(a_gpio, b_gpio, power)
         self.travel_ms = travel_ms
 
     def open(self, feed=None):
@@ -77,8 +103,8 @@ class ValveBall3Wire(_TwoPin):
 class ValveLatch2Wire(_TwoPin):
     """ラッチ式電磁弁。短いパルスで開、逆極性パルスで閉。"""
 
-    def __init__(self, a_gpio, b_gpio, pulse_ms=50):
-        super().__init__(a_gpio, b_gpio)
+    def __init__(self, a_gpio, b_gpio, pulse_ms=50, power=None):
+        super().__init__(a_gpio, b_gpio, power)
         self.pulse_ms = pulse_ms
 
     def open(self, feed=None):
@@ -91,31 +117,35 @@ class ValveLatch2Wire(_TwoPin):
 class ValveNC:
     """常時閉電磁弁。MOSFET ゲートを H にしている間だけ開く（通電し続ける）。"""
 
-    def __init__(self, a_gpio, b_gpio=None, **_):
+    def __init__(self, a_gpio, b_gpio=None, power=None):
         self.a = Pin(a_gpio, Pin.OUT, value=0)
         if b_gpio is not None:
             Pin(b_gpio, Pin.OUT, value=0)
+        self.power = power or _PowerGate()
 
     def open(self, feed=None):
+        self.power.on()
         self.a.value(1)
 
     def close(self, feed=None):
         self.a.value(0)
+        self.power.off()
 
     def idle(self):
-        self.a.value(0)
+        self.close()
 
 
 def make_valve(cfg):
     v = cfg["valve"]
     p = cfg["pins"]
     t = v.get("type", "ball_3wire")
+    power = _PowerGate(p.get("valve_power_en"), v.get("power_settle_ms", 100))
     if t == "ball_3wire":
-        return ValveBall3Wire(p["valve_a"], p["valve_b"], v.get("travel_ms", 8000))
+        return ValveBall3Wire(p["valve_a"], p["valve_b"], v.get("travel_ms", 8000), power)
     if t == "latch_2wire":
-        return ValveLatch2Wire(p["valve_a"], p["valve_b"], v.get("pulse_ms", 50))
+        return ValveLatch2Wire(p["valve_a"], p["valve_b"], v.get("pulse_ms", 50), power)
     if t == "nc_mosfet":
-        return ValveNC(p["valve_a"], p.get("valve_b"))
+        return ValveNC(p["valve_a"], p.get("valve_b"), power)
     raise ValueError("unknown valve type: %s" % t)
 
 
