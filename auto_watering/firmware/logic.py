@@ -41,6 +41,23 @@ def _in_hours(hour, window):
     return hour >= start or hour < end
 
 
+def fix_clock_jump(state, now):
+    """時計の巻き戻りを補正する。
+
+    電源断・ブラウンアウトで RTC が 2000-01-01 に戻ると、保存済みの時刻が「未来」になり、
+    COOLDOWN / DRY_WAIT が何か月も続いてしまう。未来の時刻は now に寄せる
+    （＝乾燥確認の待ち時間・散水間隔をその時点から数え直す。安全側）。
+    補正したら True。
+    """
+    changed = False
+    for k in ("dry_since", "last_water_end"):
+        v = state.get(k)
+        if v is not None and v > now:
+            state[k] = now
+            changed = True
+    return changed
+
+
 def plan(cfg, state, now, pct, hour=None, batt_mv=None):
     """散水するかどうかを決める。state は書き換えて返す。
 
@@ -54,6 +71,7 @@ def plan(cfg, state, now, pct, hour=None, batt_mv=None):
     state (dict):
       dry_since, last_water_end, day_key, waterings_today
     """
+    fix_clock_jump(state, now)
     thr = cfg["threshold_on_pct"]
 
     if pct >= thr:

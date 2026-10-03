@@ -105,6 +105,19 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(logic.plan(cfg2, st, 1001, 20, hour=3), logic.WATER)
         self.assertEqual(logic.plan(cfg2, st, 1001, 20, hour=12), logic.OUTSIDE_HOURS)
 
+    def test_clock_reset_does_not_block_forever(self):
+        # 2 か月動いた後に電池交換 → RTC が 0 付近に戻った
+        st = fresh()
+        st["last_water_end"] = 60 * 86400
+        st["dry_since"] = 60 * 86400 + 3600
+        t = 100
+        self.assertEqual(logic.plan(CFG, st, t, 10), logic.DRY_WAIT)
+        self.assertEqual(st["dry_since"], t)
+        self.assertEqual(st["last_water_end"], t)
+        # 補正後は通常どおり min_interval（6時間）後に散水できる
+        t2 = t + 360 * MIN
+        self.assertEqual(logic.plan(CFG, st, t2, 10), logic.WATER)
+
     def test_low_battery(self):
         st = fresh()
         cfg = dict(CFG, dry_confirm_delay_min=0)

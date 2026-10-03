@@ -16,6 +16,7 @@ import time
 import machine
 import network
 
+import hal
 import logic
 import store
 
@@ -137,6 +138,12 @@ class ConfigServer:
         h.append("<label>測定間隔 [分]<input name='measure_interval_min' type='number' value='%s'></label>" % c["measure_interval_min"])
         h.append("<div class='row'><div><label>乾燥時のセンサー値 [mV]（空気中）<input name='raw_dry_mv' type='number' value='%s'></label></div>" % s["raw_dry_mv"])
         h.append("<div><label>湿潤時のセンサー値 [mV]（水中）<input name='raw_wet_mv' type='number' value='%s'></label></div></div>" % s["raw_wet_mv"])
+        v = c["valve"]
+        h.append("<h3>弁（ラッチ式電磁弁）</h3>")
+        h.append("<div class='row'><div><label>パルス幅 [ms]（10〜500）<input name='pulse_ms' type='number' value='%s'></label></div>" % v.get("pulse_ms", 100))
+        h.append("<div><label>閉パルス回数<input name='close_pulses' type='number' value='%s'></label></div></div>" % v.get("close_pulses", 2))
+        h.append("<label><input type='checkbox' name='reverse_polarity' style='width:auto' %s> 開閉が逆なので極性を入れ替える</label>" % ("checked" if v.get("reverse_polarity") else ""))
+        h.append("<p class='note'>弁の種類: %s。保存するとすぐ下の「弁を開く/閉じる」に反映されます。</p>" % _esc(v.get("type", "")))
         h.append("<button type='submit'>保存</button></form>")
 
         h.append("<h3>テスト</h3><form method='post' action='/valve_open' style='display:inline'><button>弁を開く</button></form>")
@@ -189,6 +196,12 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
                 s["raw_wet_mv"] = _int(form, "raw_wet_mv", s["raw_wet_mv"])
                 hs, he = form.get("hour_start", ""), form.get("hour_end", "")
                 c["allowed_hours"] = [int(hs), int(he)] if hs.strip() and he.strip() else None
+                v = c["valve"]
+                if "pulse_ms" in form:
+                    v["pulse_ms"] = min(500, max(10, _int(form, "pulse_ms", v.get("pulse_ms", 100))))
+                    v["close_pulses"] = min(5, max(1, _int(form, "close_pulses", v.get("close_pulses", 2))))
+                    v["reverse_polarity"] = "reverse_polarity" in form
+                    self.ctx.valve = hal.make_valve(c)
                 store.save_config(c)
                 self.msg = "保存しました"
             elif path == "/save_json":
@@ -204,10 +217,10 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
                 except ValueError as e:
                     self.msg = "JSONエラー: %s" % e
             elif path == "/valve_open":
-                self.ctx.valve.open(self.ctx.feed)
+                self.ctx.valve_op("open")
                 self.msg = "弁を開きました（閉じ忘れ注意。設定モード終了時に自動で閉じます）"
             elif path == "/valve_close":
-                self.ctx.valve.close(self.ctx.feed)
+                self.ctx.valve_op("close")
                 self.msg = "弁を閉じました"
             elif path == "/water_now":
                 self.ctx.do_watering(manual=True)
@@ -296,4 +309,4 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
 def run(ctx):
     srv = ConfigServer(ctx)
     srv.serve(ctx.cfg["wifi"].get("config_mode_timeout_min", 10))
-    ctx.valve.close(ctx.feed)   # テストで開けたままでも必ず閉じる
+    ctx.valve_op("close")   # テストで開けたままでも必ず閉じる

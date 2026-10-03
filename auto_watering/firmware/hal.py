@@ -5,7 +5,8 @@
 - Valve*      : 弁の種類ごとのドライバ
     ball_3wire : 電動ボールバルブ CR-02 型（COM=GND, OPEN線に+で開, CLOSE線に+で閉）
                  または CR-01 型（2線・極性反転）。Hブリッジ（TB67H450 / DRV8835）で駆動
-    latch_2wire: ラッチ式（自己保持）電磁弁。極性反転パルスで開閉
+    latch_2wire: ラッチ式（自己保持）電磁弁（本設計の標準: US Solid JFYSV10011-G, DC12V 15W）。
+                 極性反転パルスで開閉。TB67H450 OUT1/OUT2 に2本をつなぐ
     nc_mosfet  : 常時閉(NC)電磁弁。Nch MOSFET で通電中だけ開く
   pins.valve_power_en を指定すると、弁を動かす間だけ昇圧DCDC（例: 12V）の EN を H にする。
 - Button / Led / Battery
@@ -100,18 +101,46 @@ class ValveBall3Wire(_TwoPin):
         self._drive(0, 1, self.travel_ms, feed)   # AOUT2=H → 青 +
 
 
-class ValveLatch2Wire(_TwoPin):
-    """ラッチ式電磁弁。短いパルスで開、逆極性パルスで閉。"""
+PULSE_MS_MIN = 10
+PULSE_MS_MAX = 500   # 15W コイルの発熱防止。ラッチ式は連続通電を想定していない
 
-    def __init__(self, a_gpio, b_gpio, pulse_ms=50, power=None):
+
+class ValveLatch2Wire(_TwoPin):
+    """ラッチ式電磁弁。短いパルスで開、逆極性パルスで閉。
+
+    開閉表示が無いので、閉じるときは close_pulses 回（間隔 pulse_gap_ms）パルスを出して確実にする。
+    昇圧は1回の open/close の間だけ ON（複数パルスでも ON/OFF は1回）。
+    """
+
+    def __init__(self, a_gpio, b_gpio, pulse_ms=100, power=None, close_pulses=1, pulse_gap_ms=300):
         super().__init__(a_gpio, b_gpio, power)
-        self.pulse_ms = pulse_ms
+        self.pulse_ms = min(max(int(pulse_ms), PULSE_MS_MIN), PULSE_MS_MAX)
+        self.close_pulses = max(1, int(close_pulses))
+        self.pulse_gap_ms = pulse_gap_ms
+
+    def _pulses(self, a, b, n, feed):
+        self.power.on()
+        try:
+            for i in range(n):
+                if i:
+                    time.sleep_ms(self.pulse_gap_ms)
+                    if feed:
+                        feed()
+                self.a.value(a)
+                self.b.value(b)
+                time.sleep_ms(self.pulse_ms)
+                self.a.value(0)
+                self.b.value(0)
+        finally:
+            self.a.value(0)
+            self.b.value(0)
+            self.power.off()
 
     def open(self, feed=None):
-        self._drive(1, 0, self.pulse_ms)
+        self._pulses(1, 0, 1, feed)
 
     def close(self, feed=None):
-        self._drive(0, 1, self.pulse_ms)
+        self._pulses(0, 1, self.close_pulses, feed)
 
 
 class ValveNC:
@@ -138,12 +167,16 @@ class ValveNC:
 def make_valve(cfg):
     v = cfg["valve"]
     p = cfg["pins"]
-    t = v.get("type", "ball_3wire")
+    t = v.get("type", "latch_2wire")
     power = _PowerGate(p.get("valve_power_en"), v.get("power_settle_ms", 100))
+    a, b = p["valve_a"], p["valve_b"]
+    if v.get("reverse_polarity") and t != "nc_mosfet":
+        a, b = b, a   # 開閉が逆のとき、配線を差し替えずに設定で入れ替える
     if t == "ball_3wire":
-        return ValveBall3Wire(p["valve_a"], p["valve_b"], v.get("travel_ms", 8000), power)
+        return ValveBall3Wire(a, b, v.get("travel_ms", 8000), power)
     if t == "latch_2wire":
-        return ValveLatch2Wire(p["valve_a"], p["valve_b"], v.get("pulse_ms", 50), power)
+        return ValveLatch2Wire(a, b, v.get("pulse_ms", 100), power,
+                               v.get("close_pulses", 2), v.get("pulse_gap_ms", 300))
     if t == "nc_mosfet":
         return ValveNC(p["valve_a"], p.get("valve_b"), power)
     raise ValueError("unknown valve type: %s" % t)

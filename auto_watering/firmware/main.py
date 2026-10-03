@@ -2,7 +2,8 @@
 土壌水分センサー連動 自動散水コントローラー（ESP32-C3 / MicroPython）
 
 動作:
-  1. 起動（電源ON/リセット）時は弁を必ず閉じる
+  1. 起動（電源ON/リセット）時は弁を必ず閉じる。弁の駆動中にリセットされていたら記録し、
+     散水間隔（min_interval）を空けてから再挑戦する（ブラウンアウトの繰り返し防止）
   2. 設定ボタンが押されていれば Wi-Fi 設定モード（webcfg.py）
   3. センサーを測定 → logic.plan() で判定 → 必要なら散水 → ログ保存
   4. measure_interval_min だけディープスリープ → 1 に戻る（ディープスリープ復帰では弁は閉じない）
@@ -59,12 +60,35 @@ class Context:
         mv = self.sensor.read_mv()
         return mv, logic.moisture_pct(mv, s["raw_dry_mv"], s["raw_wet_mv"])
 
+    def valve_op(self, which):
+        """弁を開く/閉じる。駆動中フラグを state に残し、駆動中のリセット（電圧降下）を検出できるようにする。"""
+        self.state["valve_busy"] = which
+        store.save_state(self.state)
+        if which == "open":
+            self.valve.open(self.feed)
+        else:
+            self.valve.close(self.feed)
+        self.state["valve_busy"] = None
+        store.save_state(self.state)
+
+    def _use_light_sleep(self):
+        # nc_mosfet は待機中も出力 H を保つ必要があるので light sleep しない
+        # （ESP32-C3 は light sleep 中に GPIO がスリープ用設定へ切り替わる）
+        return (self.cfg["watering"].get("light_sleep_wait", True)
+                and not self.cfg.get("debug_no_sleep")
+                and self.cfg["valve"].get("type") != "nc_mosfet")
+
     def _wait(self, sec):
-        """sec 秒待つ。WDT を餌付けし、設定ボタン長押し(2秒)で中断（False を返す）。"""
+        """sec 秒待つ。WDT を餌付けし、設定ボタン長押し(2秒)で中断（False を返す）。
+        待機中は 1 秒ずつ light sleep して電流を下げる（散水中・休憩中とも弁は無通電で保持される）。"""
         held = 0
+        light = self._use_light_sleep()
         for _ in range(int(sec)):
             self.feed()
-            time.sleep(1)
+            if light:
+                machine.lightsleep(1000)
+            else:
+                time.sleep(1)
             held = held + 1 if self.button.pressed() else 0
             if held >= 2:
                 return False
@@ -81,9 +105,9 @@ class Context:
                 if kind == "spray":
                     sec = min(sec, hard)
                     self.led.on()
-                    self.valve.open(self.feed)
+                    self.valve_op("open")
                     ok = self._wait(sec)
-                    self.valve.close(self.feed)
+                    self.valve_op("close")
                     self.led.off()
                     if not ok:
                         aborted = True
@@ -101,7 +125,7 @@ class Context:
                         self.log(-1, -1, "water_abort", "button")
                         break
         finally:
-            self.valve.close(self.feed)
+            self.valve_op("close")
             self.valve.idle()
             self.led.off()
         logic.finish_watering(self.state, int(time.time()))
@@ -144,8 +168,14 @@ def main():
     if cold_boot:
         # 電源投入/リセット/ブラウンアウト復帰時は、散水途中だった可能性があるので必ず閉じる
         ctx.led.blink(3, 100, 100)
-        ctx.valve.close(ctx.feed)
+        busy = ctx.state.get("valve_busy")
         ctx.log(-1, -1, "boot", "reset_cause=%d" % machine.reset_cause())
+        if busy:
+            # 弁の駆動中にリセット＝電池の電圧降下（ブラウンアウト）の疑い。
+            # すぐ再散水すると同じことを繰り返すので、散水間隔ぶん待たせる。
+            ctx.log(-1, -1, "reset_in_valve_op", busy)
+            ctx.state["last_water_end"] = int(time.time())
+        ctx.valve_op("close")
 
     if ctx.button.pressed():
         ctx.log(-1, -1, "config_mode", "")

@@ -15,7 +15,8 @@
     "pause_sec": 300,
     "repeats": 2,
     "recheck_after_each_spray": true,
-    "max_spray_sec_hard_limit": 900
+    "max_spray_sec_hard_limit": 900,
+    "light_sleep_wait": true
   },
 
   "sensor": {
@@ -26,17 +27,22 @@
   },
 
   "valve": {
-    "_comment": "type: ball_3wire(CR-02/CR-01) | latch_2wire | nc_mosfet。travel_ms は実測の開閉時間+3秒程度",
-    "type": "ball_3wire",
+    "_comment": "type: latch_2wire(標準: US Solid JFYSV10011-G 12V 15W) | ball_3wire(CR-02/CR-01) | nc_mosfet",
+    "type": "latch_2wire",
+    "pulse_ms": 100,
+    "close_pulses": 2,
+    "pulse_gap_ms": 300,
+    "reverse_polarity": false,
+    "power_settle_ms": 100,
     "travel_ms": 10000,
-    "pulse_ms": 50,
-    "power_settle_ms": 100
+    "_comment2": "pulse_ms は実機で確実に開閉する最小値の2倍程度（上限500）。開閉が逆なら reverse_polarity を true。travel_ms は ball_3wire 用"
   },
 
   "battery": {
-    "enabled": false,
+    "_comment": "ラッチ式は閉じるにも電力が要るので、電池監視は必須。low_battery_mv 未満では散水を始めない",
+    "enabled": true,
     "divider_ratio": 2.0,
-    "low_battery_mv": 3450
+    "low_battery_mv": 3600
   },
 
   "pins": {
@@ -49,7 +55,7 @@
     "config_button": 20,
     "valve_power_en": 10,
     "led": 21,
-    "_comment2": "valve_power_en: 12V昇圧DCDCのEN。DC3-6V弁を電池直結で使うなら null"
+    "_comment2": "valve_power_en: 12V昇圧DCDCのEN。12V電池で直接駆動するなら null"
   },
 
   "wifi": {
