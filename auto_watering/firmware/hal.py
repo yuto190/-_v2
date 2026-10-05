@@ -209,7 +209,7 @@ class Led:
 
 
 class Battery:
-    """BAT+ → R1 → ADC → R2 → GND の分圧で電池電圧を読む（任意）。"""
+    """電池＋ → R1 → ADC → R2 → GND の分圧で電池電圧を読む。ratio = (R1+R2)/R2（単3×4 なら 3.0）。"""
 
     def __init__(self, adc_gpio, ratio=2.0):
         self.adc = ADC(Pin(adc_gpio), atten=ADC.ATTN_11DB)

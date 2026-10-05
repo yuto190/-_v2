@@ -39,10 +39,10 @@
   },
 
   "battery": {
-    "_comment": "ラッチ式は閉じるにも電力が要るので、電池監視は必須。low_battery_mv 未満では散水を始めない",
+    "_comment": "ラッチ式は閉じるにも電力が要るので、電池監視は必須。low_battery_mv 未満では散水を始めない。単3ニッケル水素×4: 分圧1/3(ratio 3.0)・4600mV。18650(BATパッド): ratio 2.0・3600mV",
     "enabled": true,
-    "divider_ratio": 2.0,
-    "low_battery_mv": 3600
+    "divider_ratio": 3.0,
+    "low_battery_mv": 4600
   },
 
   "pins": {
