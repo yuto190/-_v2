@@ -32,10 +32,11 @@
     "pulse_ms": 100,
     "close_pulses": 2,
     "pulse_gap_ms": 300,
+    "brake_ms": 30,
     "reverse_polarity": false,
     "power_settle_ms": 100,
     "travel_ms": 10000,
-    "_comment2": "pulse_ms は実機で確実に開閉する最小値の2倍程度（上限500）。開閉が逆なら reverse_polarity を true。travel_ms は ball_3wire 用"
+    "_comment2": "pulse_ms は実機で確実に開閉する最小値の2倍程度（上限500）。開閉が逆なら reverse_polarity を true。travel_ms は ball_3wire 用。brake_ms: パルス後に TB67H450 をブレーキ（IN1=IN2=H）にする時間。コイルのエネルギーを 12V 側へ戻さないため（0 で無効、上限200）"
   },
 
   "battery": {

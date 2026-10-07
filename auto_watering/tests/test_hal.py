@@ -98,8 +98,24 @@ class ValvePowerTest(unittest.TestCase):
         v = hal.make_valve(cfg("latch_2wire"))
         EVENTS.clear()
         v.open()
+        # パルス → ブレーキ（A=B=H）→ 出力 OFF（A=B=L）→ EN=L
+        self.assertEqual(sets(), [(EN, 1), (A, 1), (B, 0), (A, 1), (B, 1), (A, 0), (B, 0), (A, 0), (B, 0), (EN, 0)])
+        self.assertEqual([e for e in EVENTS if e[0] == "sleep"], [("sleep", 100), ("sleep", 50), ("sleep", 30)])
+
+    def test_latch_brake_disabled(self):
+        c = cfg("latch_2wire")
+        c["valve"]["brake_ms"] = 0
+        v = hal.make_valve(c)
+        EVENTS.clear()
+        v.open()
         self.assertEqual(sets(), [(EN, 1), (A, 1), (B, 0), (A, 0), (B, 0), (A, 0), (B, 0), (EN, 0)])
-        self.assertIn(("sleep", 50), EVENTS)
+
+    def test_latch_brake_clamped(self):
+        c = cfg("latch_2wire")
+        c["valve"]["brake_ms"] = 5000
+        self.assertEqual(hal.make_valve(c).brake_ms, hal.BRAKE_MS_MAX)
+        c["valve"]["brake_ms"] = -5
+        self.assertEqual(hal.make_valve(c).brake_ms, 0)
 
     def test_latch_close_repeats_pulse_with_one_boost_cycle(self):
         c = cfg("latch_2wire")
@@ -107,10 +123,10 @@ class ValvePowerTest(unittest.TestCase):
         v = hal.make_valve(c)
         EVENTS.clear()
         v.close()
-        pulse = [(A, 0), (B, 1), (A, 0), (B, 0)]
+        pulse = [(A, 0), (B, 1), (A, 1), (B, 1), (A, 0), (B, 0)]
         self.assertEqual(sets(), [(EN, 1)] + pulse + pulse + [(A, 0), (B, 0), (EN, 0)])
         self.assertEqual([e for e in EVENTS if e[0] == "sleep"],
-                         [("sleep", 100), ("sleep", 50), ("sleep", 300), ("sleep", 50)])
+                         [("sleep", 100), ("sleep", 50), ("sleep", 30), ("sleep", 300), ("sleep", 50), ("sleep", 30)])
 
     def test_latch_pulse_clamped(self):
         c = cfg("latch_2wire")

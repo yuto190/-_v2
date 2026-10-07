@@ -103,6 +103,7 @@ class ValveBall3Wire(_TwoPin):
 
 PULSE_MS_MIN = 10
 PULSE_MS_MAX = 500   # 15W コイルの発熱防止。ラッチ式は連続通電を想定していない
+BRAKE_MS_MAX = 200
 
 
 class ValveLatch2Wire(_TwoPin):
@@ -110,13 +111,16 @@ class ValveLatch2Wire(_TwoPin):
 
     開閉表示が無いので、閉じるときは close_pulses 回（間隔 pulse_gap_ms）パルスを出して確実にする。
     昇圧は1回の open/close の間だけ ON（複数パルスでも ON/OFF は1回）。
+    パルスの後は brake_ms だけ IN1=IN2=H（TB67H450 のブレーキ）にして、コイルの電流をドライバの中で消してから
+    IN1=IN2=L にする。すぐ L/L（出力 OFF）にすると、コイルのエネルギーが 12V 側へ戻って電圧が上がるため。
     """
 
-    def __init__(self, a_gpio, b_gpio, pulse_ms=100, power=None, close_pulses=1, pulse_gap_ms=300):
+    def __init__(self, a_gpio, b_gpio, pulse_ms=100, power=None, close_pulses=1, pulse_gap_ms=300, brake_ms=30):
         super().__init__(a_gpio, b_gpio, power)
         self.pulse_ms = min(max(int(pulse_ms), PULSE_MS_MIN), PULSE_MS_MAX)
         self.close_pulses = max(1, int(close_pulses))
         self.pulse_gap_ms = pulse_gap_ms
+        self.brake_ms = min(max(int(brake_ms), 0), BRAKE_MS_MAX)
 
     def _pulses(self, a, b, n, feed):
         self.power.on()
@@ -129,6 +133,10 @@ class ValveLatch2Wire(_TwoPin):
                 self.a.value(a)
                 self.b.value(b)
                 time.sleep_ms(self.pulse_ms)
+                if self.brake_ms:
+                    self.a.value(1)
+                    self.b.value(1)
+                    time.sleep_ms(self.brake_ms)
                 self.a.value(0)
                 self.b.value(0)
         finally:
@@ -176,7 +184,7 @@ def make_valve(cfg):
         return ValveBall3Wire(a, b, v.get("travel_ms", 8000), power)
     if t == "latch_2wire":
         return ValveLatch2Wire(a, b, v.get("pulse_ms", 100), power,
-                               v.get("close_pulses", 2), v.get("pulse_gap_ms", 300))
+                               v.get("close_pulses", 2), v.get("pulse_gap_ms", 300), v.get("brake_ms", 30))
     if t == "nc_mosfet":
         return ValveNC(p["valve_a"], p.get("valve_b"), power)
     raise ValueError("unknown valve type: %s" % t)
