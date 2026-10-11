@@ -79,6 +79,47 @@ def _int(d, key, default):
         return default
 
 
+VALVE_TITLES = {
+    "latch_2wire": "弁（ラッチ式電磁弁）",
+    "ball_3wire": "弁（電動ボールバルブ）",
+    "nc_mosfet": "弁（常時閉の電磁弁）",
+}
+TRAVEL_MS_MIN, TRAVEL_MS_MAX = 1000, 60000
+
+
+def valve_form(v):
+    """弁の種類（valve.type）に合わせた設定欄の HTML（保存フォームの一部）を返す。"""
+    t = v.get("type", "latch_2wire")
+    h = ["<h3>%s</h3>" % VALVE_TITLES.get(t, "弁（%s）" % _esc(t)),
+         "<input type='hidden' name='valve_form' value='%s'>" % _esc(t)]
+    if t == "latch_2wire":
+        h.append("<div class='row'><div><label>パルス幅 [ms]（10〜500）<input name='pulse_ms' type='number' value='%s'></label></div>" % v.get("pulse_ms", 100))
+        h.append("<div><label>閉パルス回数<input name='close_pulses' type='number' value='%s'></label></div></div>" % v.get("close_pulses", 2))
+    elif t == "ball_3wire":
+        h.append("<label>開閉の通電時間 [ms]（%d〜%d）<input name='travel_ms' type='number' value='%s'></label>"
+                 % (TRAVEL_MS_MIN, TRAVEL_MS_MAX, v.get("travel_ms", 8000)))
+        h.append("<p class='note'>全開から全閉までの実測時間に 3000 ms を足した値。弁はリミットスイッチで止まり、この時間が過ぎると通電を切ります。</p>")
+    if t != "nc_mosfet":
+        h.append("<label><input type='checkbox' name='reverse_polarity' style='width:auto' %s> 開閉が逆なので極性を入れ替える</label>" % ("checked" if v.get("reverse_polarity") else ""))
+    h.append("<p class='note'>弁の種類: %s（変更は詳細設定の JSON で）。保存するとすぐ下の「弁を開く/閉じる」に反映されます。</p>" % _esc(t))
+    return h
+
+
+def apply_valve_form(v, form):
+    """保存フォームの弁の欄を v（config の valve）に反映する。弁の欄が送られてきたら True。"""
+    t = v.get("type", "latch_2wire")
+    if form.get("valve_form") != t:
+        return False   # 画面を開いた後に弁の種類が変わった（JSON 保存など）ときは触らない
+    if t == "latch_2wire":
+        v["pulse_ms"] = min(500, max(10, _int(form, "pulse_ms", v.get("pulse_ms", 100))))
+        v["close_pulses"] = min(5, max(1, _int(form, "close_pulses", v.get("close_pulses", 2))))
+    elif t == "ball_3wire":
+        v["travel_ms"] = min(TRAVEL_MS_MAX, max(TRAVEL_MS_MIN, _int(form, "travel_ms", v.get("travel_ms", 8000))))
+    if t != "nc_mosfet":
+        v["reverse_polarity"] = "reverse_polarity" in form
+    return True
+
+
 class ConfigServer:
     def __init__(self, ctx):
         self.ctx = ctx          # main.Context
@@ -138,12 +179,7 @@ class ConfigServer:
         h.append("<label>測定間隔 [分]<input name='measure_interval_min' type='number' value='%s'></label>" % c["measure_interval_min"])
         h.append("<div class='row'><div><label>乾燥時のセンサー値 [mV]（空気中）<input name='raw_dry_mv' type='number' value='%s'></label></div>" % s["raw_dry_mv"])
         h.append("<div><label>湿潤時のセンサー値 [mV]（水中）<input name='raw_wet_mv' type='number' value='%s'></label></div></div>" % s["raw_wet_mv"])
-        v = c["valve"]
-        h.append("<h3>弁（ラッチ式電磁弁）</h3>")
-        h.append("<div class='row'><div><label>パルス幅 [ms]（10〜500）<input name='pulse_ms' type='number' value='%s'></label></div>" % v.get("pulse_ms", 100))
-        h.append("<div><label>閉パルス回数<input name='close_pulses' type='number' value='%s'></label></div></div>" % v.get("close_pulses", 2))
-        h.append("<label><input type='checkbox' name='reverse_polarity' style='width:auto' %s> 開閉が逆なので極性を入れ替える</label>" % ("checked" if v.get("reverse_polarity") else ""))
-        h.append("<p class='note'>弁の種類: %s。保存するとすぐ下の「弁を開く/閉じる」に反映されます。</p>" % _esc(v.get("type", "")))
+        h.extend(valve_form(c["valve"]))
         h.append("<button type='submit'>保存</button></form>")
 
         h.append("<h3>テスト</h3><form method='post' action='/valve_open' style='display:inline'><button>弁を開く</button></form>")
@@ -196,11 +232,7 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
                 s["raw_wet_mv"] = _int(form, "raw_wet_mv", s["raw_wet_mv"])
                 hs, he = form.get("hour_start", ""), form.get("hour_end", "")
                 c["allowed_hours"] = [int(hs), int(he)] if hs.strip() and he.strip() else None
-                v = c["valve"]
-                if "pulse_ms" in form:
-                    v["pulse_ms"] = min(500, max(10, _int(form, "pulse_ms", v.get("pulse_ms", 100))))
-                    v["close_pulses"] = min(5, max(1, _int(form, "close_pulses", v.get("close_pulses", 2))))
-                    v["reverse_polarity"] = "reverse_polarity" in form
+                if apply_valve_form(c["valve"], form):
                     self.ctx.valve = hal.make_valve(c)
                 store.save_config(c)
                 self.msg = "保存しました"

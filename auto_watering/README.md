@@ -382,7 +382,7 @@ MicroPython 製。ユーザーがPython に慣れていることを前提に、�
 | `firmware/hal.py` | センサー・弁（ラッチ式／ボールバルブ／NC）・弁用昇圧電源のON/OFF・ボタン・LED・電池監視 |
 | `firmware/webcfg.py` | Wi‑Fi 設定モード（スマホから設定変更、弁テスト・パルス幅調整、ログ閲覧、時計合わせ） |
 | `firmware/store.py` | config/state/log のフラッシュ保存 |
-| `tests/test_logic.py`, `tests/test_hal.py` | `python3 -m unittest auto_watering/tests/test_logic.py auto_watering/tests/test_hal.py` でPC上で検証（判定ロジック、時計巻き戻り、パルス列と昇圧ON/OFFの順序、極性反転） |
+| `tests/test_logic.py`, `tests/test_hal.py`, `tests/test_webcfg.py` | `python3 -m unittest auto_watering/tests/test_logic.py auto_watering/tests/test_hal.py auto_watering/tests/test_webcfg.py` でPC上で検証（判定ロジック、時計巻き戻り、パルス列と昇圧ON/OFFの順序、極性反転、設定画面の弁の欄） |
 
 ### 6.1 要求仕様への対応
 
@@ -433,7 +433,7 @@ allowed_hours の外（時計設定時のみ） → OUTSIDE_HOURS
 3. ブラウザで `http://192.168.4.1/` を開く。
    - 現在の水分 %・センサー mV・電池電圧・状態・直近ログ
    - しきい値、散水時間/休憩/回数、待ち時間、測定間隔 → **保存**
-   - 弁のパルス幅・閉パルス回数・極性の入れ替え → **保存**（すぐ反映）
+   - 弁の設定 → **保存**（すぐ反映）。欄は `valve.type` で変わる: ラッチ式はパルス幅・閉パルス回数、ボールバルブは開閉の通電時間（`travel_ms`）。どちらも極性の入れ替えあり
    - **弁を開く / 閉じる**（動作確認）、**今すぐ1サイクル散水**、**時刻合わせ**
    - 詳細設定（JSON 全体の編集）
 4. 「設定モード終了」を押すか、10 分無操作で通常動作に戻る。
