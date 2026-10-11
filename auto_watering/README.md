@@ -463,6 +463,23 @@ mpremote reset
    ```
 5. 開発中は `config.json` に `"debug_no_sleep": true, "debug_no_wdt": true` を追加すると
    ディープスリープせず USB が切れないので `mpremote repl` でログを見られる。
+6. **本番運用の前に必ずデバッグ設定を消す**（残すとスリープしないので電池が1〜2日で切れる）。
+   本体の `config.json` を直接書き換えるので、設定画面で変えたしきい値・キャリブレーション値は消えない:
+   ```
+   mpremote exec "import store;c=store.load_config();c.pop('debug_no_sleep',None);c.pop('debug_no_wdt',None);store.save_config(c);print([k for k in c if k.startswith('debug')])"
+   mpremote reset
+   ```
+   `[]` と表示されれば消えている。リセット後はディープスリープに入り、USB の接続が切れるのが正常。
+
+**2台目（電動ボールバルブ用）**: ファームウェアと手順は同じで、`config.json` だけ変える。
+`valve.type` を `ball_3wire`、`travel_ms` を実測の開閉時間 + 3 秒にし、設定モードの Wi‑Fi 名が1台目と重ならないように `wifi.ap_ssid` を変える:
+```
+python -c "import json;c=json.load(open('config.json',encoding='utf-8'));c['valve']['type']='ball_3wire';c['valve']['travel_ms']=8000;c['wifi']['ap_ssid']='watering-setup-2';c['debug_no_sleep']=True;c['debug_no_wdt']=True;json.dump(c,open('config_ball.json','w',encoding='utf-8'),ensure_ascii=False,indent=2)"
+mpremote cp boot.py logic.py hal.py store.py webcfg.py :
+mpremote cp config_ball.json :config.json
+mpremote cp main.py :
+mpremote reset
+```
 
 **レスキュー**: ディープスリープ中は USB が認識されない。設定ボタンを押しながらリセットすれば
 10 分間起きているので、その間に `mpremote` で接続できる。
