@@ -20,8 +20,8 @@
   },
 
   "sensor": {
-    "raw_dry_mv": 2200,
-    "raw_wet_mv": 1200,
+    "raw_dry_mv": 2450,
+    "raw_wet_mv": 0,
     "samples": 16,
     "warmup_ms": 500
   },
