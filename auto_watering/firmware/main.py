@@ -61,15 +61,28 @@ class Context:
         return mv, logic.moisture_pct(mv, s["raw_dry_mv"], s["raw_wet_mv"])
 
     def valve_op(self, which):
-        """弁を開く/閉じる。駆動中フラグを state に残し、駆動中のリセット（電圧降下）を検出できるようにする。"""
+        """弁を開く/閉じる。駆動中フラグを state に残し、駆動中のリセット（電圧降下）を検出できるようにする。
+        駆動前の電池電圧（valve_start 行）と駆動中の最小値（valve_end 行）もログに残す。
+        最小値は約 200 ms ごとの測定なので、数 ms の瞬間的な落ち込みは捉えられない。"""
         self.state["valve_busy"] = which
         store.save_state(self.state)
+        self.log(-1, -1, "valve_start", which)
+        low = [None]
+
+        def feed():
+            self.feed()
+            b = self.read_battery()
+            if b is not None and (low[0] is None or b < low[0]):
+                low[0] = b
+
+        t0 = time.ticks_ms()
         if which == "open":
-            self.valve.open(self.feed)
+            self.valve.open(feed)
         else:
-            self.valve.close(self.feed)
+            self.valve.close(feed)
         self.state["valve_busy"] = None
         store.save_state(self.state)
+        self.log(-1, -1, "valve_end", "%s batt_min=%s ms=%d" % (which, low[0], time.ticks_diff(time.ticks_ms(), t0)))
 
     def _use_light_sleep(self):
         # nc_mosfet は待機中も出力 H を保つ必要があるので light sleep しない

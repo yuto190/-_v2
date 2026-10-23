@@ -9,6 +9,7 @@ ESP32 がアクセスポイント（SSID: config の wifi.ap_ssid）になり、
   - 弁の開閉テスト、今すぐ散水、時計合わせ
 ができる。一定時間操作がなければ自動で通常動作に戻る。
 """
+import gc
 import json
 import socket
 import time
@@ -296,10 +297,15 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
         srv.listen(2)
         srv.settimeout(1)
         last = time.time()
+        hb = 0
         try:
             while self.running and time.time() - last < timeout_min * 60:
                 self.ctx.feed()
                 self.ctx.led.blink(1, 20, 0)
+                # USB シリアル監視用の生存確認（フラッシュには書かない）。途切れた直後がリセットの時刻
+                if time.ticks_diff(time.ticks_ms(), hb) >= 5000:
+                    hb = time.ticks_ms()
+                    print("hb up=%ds batt=%s free=%d" % (hb // 1000, self.ctx.read_battery(), gc.mem_free()))
                 try:
                     cl, _ = srv.accept()
                 except OSError:
@@ -325,6 +331,7 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
         if len(parts) < 2:
             return
         method, path = parts[0], parts[1].split("?")[0]
+        print("http %s %s" % (method, path))
         length = 0
         while True:
             hdr = f.readline()
