@@ -332,6 +332,9 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
             return
         method, path = parts[0], parts[1].split("?")[0]
         print("http %s %s" % (method, path))
+        if path not in ("/log", "/favicon.ico"):
+            # フラッシュにも残す。リセット後のログで、落ちる直前の操作（リロード・弁の操作）が分かる
+            self.ctx.log(-1, -1, "http", "%s %s" % (method, path))
         length = 0
         while True:
             hdr = f.readline()
