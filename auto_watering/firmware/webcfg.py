@@ -296,10 +296,12 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
         srv.bind(("0.0.0.0", 80))
         srv.listen(2)
         srv.settimeout(1)
-        last = time.time()
+        # 無操作の判定は ticks_ms で行う。time.time() は「時刻合わせ」で 2000 年から現在へ跳ぶので、
+        # それで経過時間を測ると、時刻を合わせた直後に設定モードが終わってしまう
+        last = time.ticks_ms()
         hb = 0
         try:
-            while self.running and time.time() - last < timeout_min * 60:
+            while self.running and time.ticks_diff(time.ticks_ms(), last) < timeout_min * 60000:
                 self.ctx.feed()
                 self.ctx.led.blink(1, 20, 0)
                 # USB シリアル監視用の生存確認（フラッシュには書かない）。途切れた直後がリセットの時刻
@@ -310,7 +312,7 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
                     cl, _ = srv.accept()
                 except OSError:
                     continue
-                last = time.time()
+                last = time.ticks_ms()
                 try:
                     cl.settimeout(5)
                     self._handle_client(cl)
