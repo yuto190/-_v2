@@ -1,8 +1,9 @@
-"""webcfg.py の弁の設定欄（弁の種類ごとの表示と保存）を CPython で検証する。
+"""webcfg.py の弁の設定欄（弁の種類ごとの表示と保存）とセンサー測定（/sensor）を CPython で検証する。
 python3 -m unittest auto_watering/tests/test_webcfg.py
 """
 import os
 import sys
+import json
 import types
 import unittest
 
@@ -63,6 +64,61 @@ class ValveFormTest(unittest.TestCase):
         self.assertFalse(webcfg.apply_valve_form(v, {"valve_form": "latch_2wire", "pulse_ms": "50"}))
         self.assertEqual(v, {"type": "ball_3wire", "travel_ms": 8000})
         self.assertFalse(webcfg.apply_valve_form(v, {}))
+
+
+class _FakeSensor:
+    def __init__(self, mv=1200, fail=False):
+        self.warmup_ms = 500
+        self.mv = mv
+        self.fail = fail
+        self.used_warmup = None
+
+    def read_mv(self):
+        self.used_warmup = self.warmup_ms
+        if self.fail:
+            raise OSError("adc")
+        return self.mv
+
+
+class _FakeCtx:
+    def __init__(self, sensor):
+        self.cfg = {"sensor": {"raw_dry_mv": 2400, "raw_wet_mv": 0, "warmup_ms": 500}}
+        self.sensor = sensor
+        self.state = {}
+
+    def read_battery(self):
+        return 5200
+
+
+class SensorEndpointTest(unittest.TestCase):
+    def get(self, sensor, query=""):
+        srv = webcfg.ConfigServer(_FakeCtx(sensor))
+        ctype, body = srv.handle("GET", "/sensor", "", query)
+        self.assertEqual(ctype, "application/json")
+        return json.loads(body)
+
+    def test_reading_and_pct(self):
+        r = self.get(_FakeSensor(1200))
+        self.assertEqual(r, {"mv": 1200, "pct": 50, "batt": 5200, "warmup": 500})
+
+    def test_warmup_override_is_temporary_and_clamped(self):
+        sen = _FakeSensor()
+        self.assertEqual(self.get(sen, "w=2000")["warmup"], 2000)
+        self.assertEqual(sen.used_warmup, 2000)
+        self.assertEqual(sen.warmup_ms, 500)
+        self.assertEqual(self.get(sen, "w=999999")["warmup"], webcfg.WARMUP_MS_MAX)
+        self.assertEqual(self.get(sen, "w=-5")["warmup"], 0)
+        self.assertEqual(self.get(sen, "w=abc")["warmup"], 500)
+
+    def test_error_restores_warmup(self):
+        sen = _FakeSensor(fail=True)
+        self.assertIn("error", self.get(sen, "w=100"))
+        self.assertEqual(sen.warmup_ms, 500)
+
+    def test_panel_buttons_do_not_submit(self):
+        html = "".join(webcfg.sensor_panel(500))
+        self.assertEqual(html.count("<button"), html.count("type='button'"))
+        self.assertIn("value='500'", html)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ ESP32 がアクセスポイント（SSID: config の wifi.ap_ssid）になり、
   - 現在の水分値・電池電圧・状態・直近ログ
   - しきい値、散水時間/休憩/繰り返し、測定間隔などの変更
   - 弁の開閉テスト、今すぐ散水、時計合わせ
+  - センサーの測定（任意のタイミング・連続測定。キャリブレーション用）
 ができる。一定時間操作がなければ自動で通常動作に戻る。
 """
 import gc
@@ -86,6 +87,24 @@ VALVE_TITLES = {
     "nc_mosfet": "弁（常時閉の電磁弁）",
 }
 TRAVEL_MS_MIN, TRAVEL_MS_MAX = 1000, 60000
+WARMUP_MS_MAX = 5000
+
+# センサー測定欄のスクリプト。/sensor を呼んで結果を積み上げ、平均・標準偏差・最小・最大を出す。
+# 連続測定は 3 秒ごと・最大 100 回（5 分）で止める（開いたままだと無操作扱いにならず設定モードが終わらないため）
+_SENSOR_JS = """<script>var S=[],SA=null,ST=null,SN=0,SB=0;
+function so(t){document.getElementById('so').textContent=t}
+function sm(){if(SB)return;SB=1;var x=new XMLHttpRequest();x.open('GET','/sensor?w='+document.getElementById('sw').value);x.timeout=15000;
+x.onload=function(){SB=0;var r;try{r=JSON.parse(x.responseText)}catch(e){so('応答エラー');return}
+if(r.error){so('エラー: '+r.error);return}S.push(r.mv);sd(r)};
+x.onerror=x.ontimeout=function(){SB=0;so('通信エラー（本体がリセットした可能性があります）')};x.send()}
+function sd(r){var n=S.length,mn=Math.min.apply(null,S),mx=Math.max.apply(null,S),a=0,v=0,i;
+for(i=0;i<n;i++)a+=S[i];a/=n;for(i=0;i<n;i++)v+=(S[i]-a)*(S[i]-a);v=n>1?Math.sqrt(v/(n-1)):0;SA=Math.round(a);
+so('今回: '+r.mv+' mV（'+r.pct+' %）\\n回数: '+n+'  平均: '+SA+' mV  標準偏差: '+v.toFixed(1)+' mV\\n最小: '+mn+'  最大: '+mx+'（差 '+(mx-mn)+' mV）\\n電池: '+(r.batt==null?'-':r.batt+' mV')+'  給電後の待ち: '+r.warmup+' ms'
++(r.mv>=2400?'\\n※ 2,400 mV 以上: ADC の上限付近で頭打ちの可能性':''))}
+function sc(){var b=document.getElementById('scb');if(ST){clearInterval(ST);ST=null;b.textContent='連続測定（3秒ごと）';return}
+SN=0;b.textContent='連続測定を止める';sm();ST=setInterval(function(){if(++SN>=100){sc();return}sm()},3000)}
+function sr(){S=[];SA=null;so('統計をリセットしました')}
+function sf(id){if(SA==null){so('先に測定してください');return}document.getElementById(id).value=SA}</script>"""
 
 
 def valve_form(v):
@@ -119,6 +138,22 @@ def apply_valve_form(v, form):
     if t != "nc_mosfet":
         v["reverse_polarity"] = "reverse_polarity" in form
     return True
+
+
+def sensor_panel(warmup_ms):
+    """センサー測定欄（設定フォームの中に置く。ボタンは type='button' なので送信しない）。"""
+    return [
+        "<div style='border:1px solid #ccc;padding:.2em .6em;margin:.6em 0'><p><b>センサーの測定（キャリブレーション用）</b></p>",
+        "<label>給電後の待ち [ms]（この測定だけに使う。設定は変わらない）<input id='sw' type='number' value='%d' onkeydown='if(event.key==\"Enter\"){event.preventDefault();sm()}'></label>" % warmup_ms,
+        "<button type='button' onclick='sm()'>今すぐ測定</button>",
+        "<button type='button' id='scb' onclick='sc()'>連続測定（3秒ごと）</button>",
+        "<button type='button' onclick='sr()'>統計をリセット</button>",
+        "<pre id='so' style='font-size:1em'>未測定</pre>",
+        "<button type='button' onclick='sf(\"raw_dry_mv\")'>平均を乾燥時の値へ</button>",
+        "<button type='button' onclick='sf(\"raw_wet_mv\")'>平均を湿潤時の値へ</button>",
+        "<p class='note'>% はいま保存されている乾燥・湿潤時の値で計算します。値を入れたあと「保存」を押すまで設定は変わりません。"
+        "連続測定は 100 回（5 分）で止まります。</p></div>",
+    ]
 
 
 class ConfigServer:
@@ -178,8 +213,9 @@ class ConfigServer:
         h.append("<p class='note'>時間帯制限は時計が設定されているときだけ有効です。</p>")
         h.append("<h3>測定・センサー</h3>")
         h.append("<label>測定間隔 [分]<input name='measure_interval_min' type='number' value='%s'></label>" % c["measure_interval_min"])
-        h.append("<div class='row'><div><label>乾燥時のセンサー値 [mV]（空気中）<input name='raw_dry_mv' type='number' value='%s'></label></div>" % s["raw_dry_mv"])
-        h.append("<div><label>湿潤時のセンサー値 [mV]（水中）<input name='raw_wet_mv' type='number' value='%s'></label></div></div>" % s["raw_wet_mv"])
+        h.append("<div class='row'><div><label>乾燥時のセンサー値 [mV]（空気中）<input name='raw_dry_mv' id='raw_dry_mv' type='number' value='%s'></label></div>" % s["raw_dry_mv"])
+        h.append("<div><label>湿潤時のセンサー値 [mV]（水中）<input name='raw_wet_mv' id='raw_wet_mv' type='number' value='%s'></label></div></div>" % s["raw_wet_mv"])
+        h.extend(sensor_panel(s.get("warmup_ms", 500)))
         h.extend(valve_form(c["valve"]))
         h.append("<button type='submit'>保存</button></form>")
 
@@ -200,12 +236,31 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
         h.append(_esc("\n".join(store.tail_log(30))))
         h.append("</pre><p><a href='/log'>ログ全体 (CSV)</a></p>")
         h.append("<h3>詳細設定 (JSON)</h3><form method='post' action='/save_json'><textarea name='json' rows='12' style='width:100%%;font-family:monospace'>%s</textarea><br><button>JSONを保存</button></form>" % _esc(json.dumps(c)))
+        h.append(_SENSOR_JS)
         h.append("</body></html>")
         return "".join(h)
 
     # ---------- ハンドラ ----------
-    def handle(self, method, path, body):
+    def sensor_json(self, query):
+        """センサーを 1 回測る（中央値 1 つ）。w= で給電後の待ち時間をこの測定だけ変えられる（設定は変えない）。"""
+        sen = self.ctx.sensor
+        s = self.cfg["sensor"]
+        keep = sen.warmup_ms
+        w = min(max(_int(query, "w", keep), 0), WARMUP_MS_MAX)
+        sen.warmup_ms = w
+        try:
+            mv = sen.read_mv()
+        except Exception as e:  # noqa
+            return json.dumps({"error": repr(e)})
+        finally:
+            sen.warmup_ms = keep
+        return json.dumps({"mv": mv, "pct": logic.moisture_pct(mv, s["raw_dry_mv"], s["raw_wet_mv"]),
+                           "batt": self.ctx.read_battery(), "warmup": w})
+
+    def handle(self, method, path, body, query=""):
         c = self.cfg
+        if method == "GET" and path == "/sensor":
+            return "application/json", self.sensor_json(_parse_form(query))
         if method == "GET" and path == "/log":
             try:
                 with open(store.LOG_FILE) as f:
@@ -332,9 +387,11 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
         parts = line.decode().split()
         if len(parts) < 2:
             return
-        method, path = parts[0], parts[1].split("?")[0]
+        method = parts[0]
+        path, _, query = parts[1].partition("?")
         print("http %s %s" % (method, path))
-        if path not in ("/log", "/favicon.ico"):
+        # /sensor は連続測定で 3 秒ごとに来るので、フラッシュには書かない
+        if path not in ("/log", "/favicon.ico", "/sensor"):
             # フラッシュにも残す。リセット後のログで、落ちる直前の操作（リロード・弁の操作）が分かる
             self.ctx.log(-1, -1, "http", "%s %s" % (method, path))
         length = 0
@@ -345,7 +402,7 @@ document.getElementById('t_mi').value=n.getMinutes();document.getElementById('t_
             if hdr.lower().startswith(b"content-length:"):
                 length = int(hdr.split(b":")[1].strip())
         body = f.read(length).decode() if length else ""
-        ctype, resp = self.handle(method, path, body)
+        ctype, resp = self.handle(method, path, body, query)
         cl.write(("HTTP/1.0 200 OK\r\nContent-Type: %s; charset=utf-8\r\nConnection: close\r\n\r\n" % ctype).encode())
         cl.write(resp.encode())
 
